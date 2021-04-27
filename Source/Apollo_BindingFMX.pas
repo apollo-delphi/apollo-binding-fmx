@@ -36,6 +36,7 @@ type
       const RttiProperties: TArray<TRttiProperty>): TRttiProperty;
     function PrepareBindItem(aControl: TFmxObject; aSource: TObject;
       aRttiProperty: TRttiProperty): TBindItem;
+    procedure AddSourceFreeNotification(aSource: TObject);
     procedure DoBind(aControl: TFmxObject; aSource: TObject; const aCntrNamePrefix: string;
       aRttiProperties: TArray<TRttiProperty>);
     procedure EditOnChangeTracking(Sender: TObject);
@@ -59,6 +60,7 @@ type
   public
     class function GetControls<T: class>(aSource: TObject): TArray<T>;
     class function GetBindItem(aControl: TObject): TBindItem;
+    class function GetSource<T: class>(aControl: TObject): T;
     class procedure Bind(aRootControl: TFmxObject; aSource: TObject; const aCntrNamePrefix: string = '');
     class procedure Notify(aSource: TObject);
     class procedure SingleBind(aControl: TFmxObject; aSource: TObject);
@@ -99,6 +101,11 @@ begin
       Result := Result + [BindItem.Control as T];
 end;
 
+class function TBind.GetSource<T>(aControl: TObject): T;
+begin
+  Result := GetBindItem(aControl).Source as T;
+end;
+
 class procedure TBind.Notify(aSource: TObject);
 begin
   gBindingFMX.Notify(aSource);
@@ -111,22 +118,27 @@ end;
 
 { TBindingFMX }
 
+procedure TBindingFMX.AddSourceFreeNotification(aSource: TObject);
+var
+  SourceFreeNotify: ISourceFreeNotification;
+begin
+  if aSource.GetInterface(ISourceFreeNotification, SourceFreeNotify) and
+     (Length(GetBindItems(aSource)) > 0)
+  then
+    SourceFreeNotify.AddFreeNotify(SourceFreeNotification);
+end;
+
 procedure TBindingFMX.Bind(aRootControl: TFmxObject; aSource: TObject;
   const aCntrNamePrefix: string);
 var
   RttiContext: TRttiContext;
   RttiProperties: TArray<TRttiProperty>;
-  SourceFreeNotify: ISourceFreeNotification;
 begin
   RttiContext := TRttiContext.Create;
   try
     RttiProperties := RttiContext.GetType(aSource.ClassType).GetProperties;
     DoBind(aRootControl, aSource, aCntrNamePrefix, RttiProperties);
-
-    if aSource.GetInterface(ISourceFreeNotification, SourceFreeNotify) and
-       (Length(GetBindItems(aSource)) > 0)
-    then
-      SourceFreeNotify.AddFreeNotify(SourceFreeNotification);
+    AddSourceFreeNotification(aSource);
   finally
     RttiContext.Free;
   end;
@@ -337,7 +349,8 @@ end;
 
 procedure TBindingFMX.SingleBind(aControl: TFmxObject; aSource: TObject);
 begin
-  BindPropertyToControl(aSource, nil, aControl);
+  if BindPropertyToControl(aSource, nil, aControl) then
+    AddSourceFreeNotification(aSource);
 end;
 
 procedure TBindingFMX.SourceFreeNotification(Sender: TObject);
