@@ -25,8 +25,8 @@ begin
   Application.Initialize;
   Application.Title := 'DUnitX';
   {$IFDEF UseFMX}
-  AApplication.CreateForm(TGUIXTestRunner, GUIXTestRunner);
-  $ENDIF}
+  Application.CreateForm(TGUIXTestRunner, GUIXTestRunner);
+  {$ENDIF}
   {$IFDEF UseVCL}
   Application.CreateForm(TGUIVCLTestRunner, GUIVCLTestRunner);
   {$ENDIF}
