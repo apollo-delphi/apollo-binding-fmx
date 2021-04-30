@@ -14,22 +14,8 @@ uses
   System.Rtti;
 
 type
-  TBindItem = class
+  TBindingFMX = class(TBindingEngine)
   strict private
-    FControl: TObject;
-    FNativeEvent: TNotifyEvent;
-    FPropName: string;
-    FSource: TObject;
-  public
-    property Control: TObject read FControl write FControl;
-    property NativeEvent: TNotifyEvent read FNativeEvent write FNativeEvent;
-    property PropName: string read FPropName write FPropName;
-    property Source: TObject read FSource write FSource;
-  end;
-
-  TBindingFMX = class(TBindingEngine, IFreeNotification)
-  strict private
-    FBindItemList: TObjectList<TBindItem>;
     function BindPropertyToControl(aSource: TObject; aRttiProperty: TRttiProperty;
       aControl: TObject): Boolean;
     function GetMatchedSourceProperty(const aCntrNamePrefix: string; aControl: TFmxObject;
@@ -40,20 +26,13 @@ type
     procedure DoBind(aControl: TFmxObject; aSource: TObject; const aCntrNamePrefix: string;
       aRttiProperties: TArray<TRttiProperty>);
     procedure EditOnChangeTracking(Sender: TObject);
-    procedure FreeNotification(aObject: TObject); // controls free natification
     procedure SetToEdit(aSource: TObject; aRttiProperty: TRttiProperty; aEdit: TEdit);
     procedure SetToLabel(aSource: TObject; aRttiProperty: TRttiProperty; aLabel: TLabel);
     procedure SetToTreeViewItem(aSource: TObject; aRttiProperty: TRttiProperty; aTreeViewItem: TTreeViewItem);
-    procedure SourceFreeNotification(Sender: TObject); // source objects free natification
   private
-    function GetBindItem(aControl: TObject): TBindItem;
-    function GetBindItems(aSource: TObject): TArray<TBindItem>;
     procedure Bind(aRootControl: TFmxObject; aSource: TObject; const aCntrNamePrefix: string);
     procedure Notify(aSource: TObject);
     procedure SingleBind(aControl: TFmxObject; aSource: TObject);
-  public
-    constructor Create;
-    destructor Destroy; override;
   end;
 
   TBind = class(TBindAbstract)
@@ -161,18 +140,6 @@ begin
     Result := False;
 end;
 
-constructor TBindingFMX.Create;
-begin
-  FBindItemList := TObjectList<TBindItem>.Create(True);
-end;
-
-destructor TBindingFMX.Destroy;
-begin
-  FBindItemList.Free;
-
-  inherited;
-end;
-
 procedure TBindingFMX.DoBind(aControl: TFmxObject; aSource: TObject; const aCntrNamePrefix: string;
   aRttiProperties: TArray<TRttiProperty>);
 var
@@ -205,38 +172,6 @@ begin
 
   if Assigned(BindItem.NativeEvent) then
     BindItem.NativeEvent(Sender);
-end;
-
-procedure TBindingFMX.FreeNotification(aObject: TObject);
-var
-  BindItem: TBindItem;
-begin
-  BindItem := GetBindItem(aObject);
-
-  if Assigned(BindItem) then
-    FBindItemList.Remove(BindItem);
-end;
-
-function TBindingFMX.GetBindItem(aControl: TObject): TBindItem;
-var
-  BindItem: TBindItem;
-begin
-  Result := nil;
-
-  for BindItem in FBindItemList do
-    if BindItem.Control = aControl then
-      Exit(BindItem);
-end;
-
-function TBindingFMX.GetBindItems(aSource: TObject): TArray<TBindItem>;
-var
-  BindItem: TBindItem;
-begin
-  Result := [];
-
-  for BindItem in FBindItemList do
-    if BindItem.Source = aSource then
-      Result := Result + [BindItem];
 end;
 
 function TBindingFMX.GetMatchedSourceProperty(const aCntrNamePrefix: string;
@@ -351,17 +286,6 @@ procedure TBindingFMX.SingleBind(aControl: TFmxObject; aSource: TObject);
 begin
   if BindPropertyToControl(aSource, nil, aControl) then
     AddSourceFreeNotification(aSource);
-end;
-
-procedure TBindingFMX.SourceFreeNotification(Sender: TObject);
-var
-  BindItem: TBindItem;
-  BindItems: TArray<TBindItem>;
-begin
-  BindItems := GetBindItems(Sender);
-
-  for BindItem in BindItems do
-    FBindItemList.Remove(BindItem);
 end;
 
 initialization
