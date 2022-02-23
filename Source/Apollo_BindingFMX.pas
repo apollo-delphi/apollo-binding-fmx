@@ -4,35 +4,28 @@ interface
 
 uses
   Apollo_Binding_Core,
-  FMX.StdCtrls,
   FMX.Edit,
-  FMX.Objects,
-  FMX.TreeView,
-  FMX.Types,
-  System.Classes,
+  FMX.Memo,
   System.Rtti;
 
 type
   TBindingFMX = class(TBindingEngine)
   private
-    procedure EditOnChangeTracking(Sender: TObject);
-    procedure SetToEdit(aEdit: TEdit; const aValue: string; var aBindItem: TBindItem);
-    procedure SetToLabel(aLabel: TLabel; const aValue: string; var aBindItem: TBindItem);
-    procedure SetToTreeViewItem(aTreeViewItem: TTreeViewItem; const aValue: string; var aBindItem: TBindItem);
+    procedure ApplyToEdit(aEdit: TEdit; aBindItem: TBindItem; const aValue: string);
+    procedure ApplyToMemo(aMemo: TMemo; aBindItem: TBindItem; const aValue: string);
+    procedure EditOnChange(Sender: TObject);
+    procedure MemoOnChange(Sender: TObject);
   protected
-    procedure BindPropertyToControl(aSource: TObject; aRttiProperty: TRttiProperty; aControl: TComponent); override;
-    procedure DoBind(aSource: TObject; aControl: TComponent; const aControlNamePrefix: string;
-      aRttiProperties: TArray<TRttiProperty>); override;
+    function GetSourceFromControl(aControl: TObject): TObject; override;
+    function IsValidControl(aControl: TObject; out aControlName: string;
+      out aChildControls: TArray<TObject>): Boolean; override;
+    procedure ApplyToControls(aBindItem: TBindItem; aRttiProperty: TRttiProperty); override;
   end;
 
   TBind = class
   public
-    class function GetControls<T: class>(aSource: TObject): TArray<T>;
-    class function GetBindItem(aControl: TFmxObject; const aIndex: Integer = 0): TBindItem;
-    class function GetSource<T: class>(aControl: TFmxObject; const aIndex: Integer = 0): T;
-    class procedure Bind(aSource: TObject; aRootControl: TFmxObject; const aControlNamePrefix: string = '');
-    class procedure Notify(aSource: TObject);
-    class procedure SingleBind(aSource: TObject; aControl: TFmxObject; const aIndex: Integer = 0);
+    class procedure Bind(aSource: TObject; aRootControl: TObject; const aControlNamePrefix: string = ''); static;
+    class procedure Notify(aSource: TObject); static;
   end;
 
 var
@@ -41,125 +34,132 @@ var
 implementation
 
 uses
-  System.SysUtils,
-  System.TypInfo;
+  FMX.Controls,
+  FMX.StdCtrls,
+  System.Classes,
+  System.SysUtils;
 
 { TBind }
 
-class procedure TBind.Bind(aSource: TObject; aRootControl: TFmxObject; const aControlNamePrefix: string);
+class procedure TBind.Bind(aSource, aRootControl: TObject;
+  const aControlNamePrefix: string);
 begin
   gBindingFMX.Bind(aSource, aRootControl, aControlNamePrefix);
 end;
 
-class function TBind.GetBindItem(aControl: TFmxObject; const aIndex: Integer): TBindItem;
-begin
-  Result := gBindingFMX.GetBindItem(aControl, aIndex);
-end;
-
-class function TBind.GetControls<T>(aSource: TObject): TArray<T>;
-var
-  BindItem: TBindItem;
-  BindItems: TArray<TBindItem>;
-begin
-  Result := [];
-
-  BindItems := gBindingFMX.GetBindItems(aSource);
-  for BindItem in BindItems do
-    if BindItem.Control is T then
-      Result := Result + [BindItem.Control as T];
-end;
-
-class function TBind.GetSource<T>(aControl: TFmxObject; const aIndex: Integer = 0): T;
-begin
-  Result := GetBindItem(aControl, aIndex).Source as T;
-end;
-
 class procedure TBind.Notify(aSource: TObject);
-begin
+begin
   gBindingFMX.Notify(aSource);
-end;
-
-class procedure TBind.SingleBind(aSource: TObject; aControl: TFmxObject; const aIndex: Integer);
-begin
-  gBindingFMX.SingleBind(aSource, aControl, aIndex);
 end;
 
 { TBindingFMX }
 
-procedure  TBindingFMX.BindPropertyToControl(aSource: TObject;
-  aRttiProperty: TRttiProperty; aControl: TComponent);
+procedure TBindingFMX.ApplyToControls(aBindItem: TBindItem;
+  aRttiProperty: TRttiProperty);
 var
-  BindItem: TBindItem;
+  Control: TObject;
+  Source: TObject;
 begin
-  BindItem := AddBindItem(aSource, aRttiProperty.Name, aControl, 0);
+  Control := aBindItem.Control;
+  Source := aBindItem.Source;
 
-  if aControl is TLabel then
-    SetToLabel(TLabel(aControl), aRttiProperty.GetValue(aSource).AsString, BindItem)
+  if Control.InheritsFrom(TEdit) then
+    ApplyToEdit(TEdit(Control), aBindItem, PropertyValToStr(aRttiProperty, Source))
   else
-  if aControl is TEdit then
-    SetToEdit(TEdit(aControl), aRttiProperty.GetValue(aSource).AsString, BindItem)
+  if Control.InheritsFrom(TMemo) then
+    ApplyToMemo(TMemo(Control), aBindItem, PropertyValToStr(aRttiProperty, Source))
   else
-  if aControl.InheritsFrom(TTreeViewItem) then
-    SetToTreeViewItem(TTreeViewItem(aControl), aRttiProperty.GetValue(aSource).AsString, BindItem)
-  else
-    raise Exception.CreateFmt('TBindingFMX: Control class %s does not supported', [aControl.ClassName]);
+    raise Exception.CreateFmt('TBindingFMX: Control class %s does not support.', [Control.ClassName]);
 end;
 
-procedure TBindingFMX.DoBind(aSource: TObject; aControl: TComponent; const aControlNamePrefix: string;
-      aRttiProperties: TArray<TRttiProperty>);
-var
-  ChildControl: TFmxObject;
-  Control: TFmxObject;
-  i: Integer;
-  RttiProperty: TRttiProperty;
-begin
-  Control := aControl as TFmxObject;
-
-  for i := 0 to Control.ChildrenCount - 1 do
-  begin
-    ChildControl := Control.Children.Items[i];
-
-    if ChildControl.ChildrenCount > 0 then
-      DoBind(aSource, ChildControl, aControlNamePrefix, aRttiProperties);
-
-    RttiProperty := GetMatchedSourceProperty(aControlNamePrefix, ChildControl.Name, aRttiProperties);
-    if Assigned(RttiProperty) then
-      BindPropertyToControl(aSource, RttiProperty, ChildControl);
-  end;
-end;
-
-procedure TBindingFMX.EditOnChangeTracking(Sender: TObject);
-var
-  BindItem: TBindItem;
-  Edit: TEdit;
-begin
-  Edit := Sender as TEdit;
-  BindItem := GetBindItem(Edit);
-
-  SetPropValue(BindItem.Source, BindItem.PropName, Edit.Text);
-
-  if Assigned(BindItem.NativeEvent) then
-    BindItem.NativeEvent(Sender);
-end;
-
-procedure TBindingFMX.SetToEdit(aEdit: TEdit; const aValue: string; var aBindItem: TBindItem);
+procedure TBindingFMX.ApplyToEdit(aEdit: TEdit; aBindItem: TBindItem;
+  const aValue: string);
 begin
   aEdit.Text := aValue;
 
-  if Assigned(aEdit.OnChangeTracking) then
-    aBindItem.NativeEvent := aEdit.OnChangeTracking;
-
-  aEdit.OnChangeTracking := EditOnChangeTracking;
+  SetNativeEvent(aBindItem.New, aEdit, TMethod(aEdit.OnChange));
+  aEdit.OnChange := EditOnChange;
 end;
 
-procedure TBindingFMX.SetToLabel(aLabel: TLabel; const aValue: string; var aBindItem: TBindItem);
+procedure TBindingFMX.ApplyToMemo(aMemo: TMemo; aBindItem: TBindItem;
+  const aValue: string);
 begin
-  aLabel.Text := aValue;
+  aMemo.Text := aValue;
+
+  SetNativeEvent(aBindItem.New, aMemo, TMethod(aMemo.OnChange));
+  aMemo.OnChange := MemoOnChange;
 end;
 
-procedure TBindingFMX.SetToTreeViewItem(aTreeViewItem: TTreeViewItem; const aValue: string; var aBindItem: TBindItem);
+procedure TBindingFMX.EditOnChange(Sender: TObject);
+var
+  BindItem: TBindItem;
+  Edit: TCustomEdit;
+  Method: TMethod;
+  NotifyEvent: TNotifyEvent;
 begin
-  aTreeViewItem.Text := aValue;
+  Edit := Sender as TCustomEdit;
+  BindItem := GetFirstBindItemHavingProp(Edit);
+
+  BindItem.SetNewValue(Edit.Text);
+
+  if TryGetNativeEvent(Edit, {out}Method) then
+  begin
+    TMethod(NotifyEvent) := Method;
+    NotifyEvent(Sender);
+  end;
+end;
+
+function TBindingFMX.GetSourceFromControl(aControl: TObject): TObject;
+begin
+  Result := nil;
+end;
+
+function TBindingFMX.IsValidControl(aControl: TObject; out aControlName: string;
+  out aChildControls: TArray<TObject>): Boolean;
+var
+  Control: TControl;
+  i: Integer;
+begin
+  if aControl.InheritsFrom(TControl) and
+     not(aControl.InheritsFrom(TLabel))
+  then
+  begin
+    if aControl.InheritsFrom(TPanel) then
+      Result := False
+    else
+      Result := True;
+
+    Control := aControl as TControl;
+    aControlName := Control.Name;
+
+    aChildControls := [];
+    if Control.ControlsCount > 0 then
+    begin
+      for i := 0 to Control.ControlsCount - 1 do
+        aChildControls := aChildControls + [Control.Controls[i]];
+    end;
+  end
+  else
+    Result := False;
+end;
+
+procedure TBindingFMX.MemoOnChange(Sender: TObject);
+var
+  BindItem: TBindItem;
+  Memo: TMemo;
+  Method: TMethod;
+  NotifyEvent: TNotifyEvent;
+begin
+  Memo := Sender as TMemo;
+  BindItem := GetFirstBindItemHavingProp(Memo);
+
+  BindItem.SetNewValue(Memo.Text);
+
+  if TryGetNativeEvent(Memo, {out}Method) then
+  begin
+    TMethod(NotifyEvent) := Method;
+    NotifyEvent(Sender);
+  end;
 end;
 
 initialization
